@@ -1,0 +1,281 @@
+
+Milestone Report for Coursera-SwiftKey Data Science Coursera Project
+===
+
+## Table of Contents
+1. en_US.blogs.txt dataset summary
+2. en_US.news.txt dataset summary
+3. en_US.twitter.txt dataset summary
+4. Data Sampling and Transformations
+5. Profanity Filtering
+6. Unigram, Bigram, Trigram Calculations
+7. Document Term Matrix Details
+8. Plots and Analysis
+9. Predictive Method
+
+#Introduction
+This report presents basic data tables, plots and summaries as part of Exploratory analysis done on Coursera-SwiftKey dataset for Prtial Fulfilment of course Data Science Capstone done as part of Data Science Specialization offered by John Hopkins Bloomberg School of Public Health via Coursera.
+
+The goal of this project is to build a predictive model that can predict the next word that user is going to write based on his already written words. This report is aimed at non data scientist manager hence most of the R code is hidden.
+
+Dataset can be downloaded at : <https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip>
+Additional Libraries needed to execute the Code in this Report {tm,qdap,stringi,RWeka,wordcloud,ggplot2} all available at cran Project
+```{r echo=FALSE , results='hide'}
+library(tm)
+library(qdap)
+library(stringi)
+library(RWeka)
+library(wordcloud)
+library(ggplot2)
+en_us_Folder <- "capstone/final/en_US"
+Corpus <- VCorpus(DirSource(directory=en_us_Folder,encoding="UTF-8"),readerControl=list(language="en"))
+```
+
+### 1. en_US.blogs.txt dataset summary
+#### Displaying in order as 
+
+Size 
+```{r echo=FALSE}
+contentBlogs <- as.character(Corpus[[1]])
+sizeBlogs <-format(object.size(contentBlogs),units="Mb")
+sizeBlogs
+```
+Line_Count 
+```{r echo=FALSE}
+LinesBlogs <-length(contentBlogs)
+LinesBlogs
+contentBlogs <- paste(contentBlogs,collapse=" ",sep="")
+BlogsData <- unlist(stri_extract_words(contentBlogs,locale="en"))
+```
+Word_Count 
+```{r echo=FALSE}
+wordsBlogs <- length(BlogsData)
+wordsBlogs
+```
+Unique_Word_Count
+```{r echo=FALSE}
+UniquewordsBlogs <- length(unique(BlogsData))
+UniquewordsBlogs
+```
+
+### 2. en_US.news.txt dataset summary
+#### Displaying in order as 
+
+Size
+```{r echo=FALSE}
+contentNews <- as.character(Corpus[[2]])
+sizeNews <- format(object.size(contentNews),units="Mb")
+sizeNews
+```
+Line_Count 
+```{r echo=FALSE}
+
+LinesNews <- length(contentNews)
+LinesNews
+contentNews <- paste(contentNews,collapse=" ",sep="")
+NewsData <- unlist(stri_extract_words(contentNews,locale="en"))
+```
+Word_Count 
+```{r echo=FALSE}
+
+wordsNews <-length(NewsData)
+wordsNews
+```
+Unique_Word_Count
+```{r echo=FALSE}
+UniquewordsNews <- length(unique(NewsData))
+UniquewordsNews
+```
+
+### 3. en_US.twitter.txt dataset summary
+#### Displaying in order as 
+
+Size
+```{r echo=FALSE}
+contentTwitter <- as.character(Corpus[[3]])
+sizeTwitter <- format(object.size(contentTwitter),units="Mb")
+sizeTwitter
+```
+Line_Count 
+```{r echo=FALSE}
+
+LinesTwitter <- length(contentTwitter)
+LinesTwitter
+contentTwitter <- paste(contentTwitter,collapse=" ",sep="")
+TwitterData <- unlist(stri_extract_words(contentTwitter,locale="en"))
+```
+Word_Count 
+```{r echo=FALSE}
+
+wordsTwitter <- length(TwitterData)
+wordsTwitter
+```
+Unique_Word_Count
+```{r echo=FALSE}
+UniquewordsTwitter <- length(unique(TwitterData))
+UniquewordsTwitter
+```
+
+
+
+## 4. Data Sampling and Transformations
+Instead of taking a percentage of data we have sampled 100000. Sampling is required since 
+1) It will be very slow to run model for a user with low end computer
+2) Even at a high end computer other system may not be able to allocate memory to other tasks
+3) This Failure rate becomes considerable during the use of DocumentTermMatrix Phase
+4) StopWord Transformations is not applied here Since we believe user will appericiate the prediction of stopwords
+5) Also using Complete data may tend to overfit model
+
+Transformations used in the current model are
+1) replace all NonAlphabets Non Numbers or Symbols not following(":'.")
+2) removeNumbers from corpus
+```{r}
+set.seed(100)
+#Sampled 100000 lines of content due to memory issues
+Corpus[[1]]$content <- sample(Corpus[[1]]$content,100000)
+Corpus[[2]]$content <- sample(Corpus[[2]]$content,100000)
+Corpus[[3]]$content <- sample(Corpus[[3]]$content,100000)
+head(Corpus[[1]]$content,n=5)
+head(Corpus[[2]]$content,n=5)
+head(Corpus[[3]]$content,n=5)
+removeNonAlphabets <- content_transformer(function(x,pattern)gsub(pattern," ",x))
+Corpus <- tm_map(Corpus,removeNonAlphabets,"[^A-Za-z0-9:\'\\. ]")
+Corpus <- tm_map(Corpus,content_transformer(tolower))
+Corpus <- tm_map(Corpus,removeNumbers)
+Corpus <- tm_map(Corpus,stripWhitespace)
+```
+
+## 5. Profanity Lists 
+These are 1584 terms colletced from CMU and following sites
+<http://www.cs.cmu.edu/~biglou/resources/bad-words.txt>
+<https://gist.github.com/ryanlewis/a37739d710ccdb4b406d>
+
+We have manually gone through these files and removed some terms which were not looking like profanity For example  {explosion, die, kill, fear, drug}
+```{r echo=FALSE}
+ProfanityList<-read.table(file="capstone/final/Profanity_Lists/ProfanityList.txt")
+nrow(ProfanityList)
+Corpus <- tm_map(Corpus,removeWords,ProfanityList[,1])
+Corpus <- tm_map(Corpus,stripWhitespace)
+```
+
+## 6. Unigram, Bigram, Trigram Calculations
+For detecting unigrams, bigrams and trigrams we have used the following approach detect sentences in each line of dataset Mark them by "START" and "STOP" and then worked out unigrams, bigrams and trigrams.
+```{r echo=FALSE}
+UnigramTokenizer <- function(x) NGramTokenizer(x,Weka_control(min=1,max=1))
+BigramTokenizer <- function(x) NGramTokenizer(paste("<START> ",sent_detect(paste(x,".")),"<STOP>"),Weka_control(min=2,max=2))
+TrigramTokenizer <- function(x) NGramTokenizer(paste("<START> ",sent_detect(paste(x,".")),"<STOP>"),Weka_control(min=3,max=3))
+
+#BlogsUnigram <- UnigramTokenizer(Corpus[[1]]$content)
+#length(BlogsUnigram)
+#length(unique(BlogsUnigram))
+
+#NewsUnigram <- UnigramTokenizer(Corpus[[2]]$content)
+#length(NewsUnigram)
+#length(unique(NewsUnigram))
+
+#TwitterUnigram <- UnigramTokenizer(Corpus[[3]]$content)
+#length(TwitterUnigram)
+#length(unique(TwitterUnigram))
+
+#BlogsBigram <- BigramTokenizer(Corpus[[1]]$content)
+#length(BlogsBigram)
+#length(unique(BlogsBigram))
+
+#NewsBigram <- BigramTokenizer(Corpus[[2]]$content)
+#length(NewsBigram)
+#length(unique(NewsBigram))
+
+#TwitterBigram <- BigramTokenizer(Corpus[[3]]$content)
+#length(TwitterBigram)
+#length(unique(TwitterBigram))
+
+#BlogsTrigram <- TrigramTokenizer(Corpus[[1]]$content)
+#length(BlogsTrigram)
+#length(unique(BlogsTrigram))
+
+#NewsTrigram <- TrigramTokenizer(Corpus[[2]]$content)
+#length(NewsTrigram)
+#length(unique(NewsTrigram))
+
+#TwitterTrigram <- TrigramTokenizer(Corpus[[3]]$content)
+#length(TwitterTrigram)
+#length(unique(TwitterTrigram))
+```
+
+## 7. Document Term Matrix Details
+tm package in R provides DocumentTermMatrix function and TermDocumentMatrix(Transpose of Document Term Matrix) this is being used here not only for calculations but also for giving input to analysis plots 
+
+## 8. Plots and Analysis
+
+### Blogs
+```{r echo=FALSE}
+BlogsDTM <- DocumentTermMatrix(VCorpus(VectorSource(Corpus[[1]]$content)))
+BlogsDTMSparseFilterd <- removeSparseTerms(BlogsDTM,0.999)
+Blogsfreq <- sort(colSums(as.matrix(BlogsDTMSparseFilterd)),decreasing=TRUE)
+PlotFrame <- data.frame(word=names(Blogsfreq),freq=Blogsfreq)
+Barplot <- ggplot(subset(PlotFrame,freq > 5000),aes(word,freq))
+Barplot <- Barplot+geom_bar(stat="identity")+labs(x = "Blogs Word") + labs(y = "Counts")+ theme(axis.text.x = element_text(angle = 90, hjust = 1))
+Barplot
+
+hist(log(Blogsfreq))
+```                                                                                                                                                                                   
+### News
+```{r echo=FALSE}
+NewsDTM <- DocumentTermMatrix(VCorpus(VectorSource(Corpus[[2]]$content)))
+NewsDTMSparseFilterd <- removeSparseTerms(NewsDTM,0.999)
+Newsfreq <- sort(colSums(as.matrix(NewsDTMSparseFilterd)),decreasing=TRUE)
+PlotFrame <- data.frame(word=names(Newsfreq),freq=Newsfreq)
+Barplot <- ggplot(subset(PlotFrame,freq > 5000),aes(word,freq))
+Barplot <- Barplot+geom_bar(stat="identity")+labs(x = "News Word") + labs(y = "Counts")+ theme(axis.text.x = element_text(angle = 90, hjust = 1))
+Barplot
+
+hist(log(Newsfreq))
+```
+
+### Twitter
+```{r echo=FALSE}
+TwitterDTM <- DocumentTermMatrix(VCorpus(VectorSource(Corpus[[3]]$content)))
+TwitterDTMSparseFilterd <- removeSparseTerms(TwitterDTM,0.999)
+Twitterfreq <- sort(colSums(as.matrix(TwitterDTMSparseFilterd)),decreasing=TRUE)
+PlotFrame <- data.frame(word=names(Twitterfreq),freq=Twitterfreq)
+Barplot <- ggplot(subset(PlotFrame,freq > 5000),aes(word,freq))
+Barplot <- Barplot+geom_bar(stat="identity")+labs(x = "Twitter Word") + labs(y = "Counts")+ theme(axis.text.x = element_text(angle = 90, hjust = 1))
+Barplot
+
+hist(log(Twitterfreq))
+```
+As can be observed from the three histograms terms here follow long tail distribution that is at low frequencies we have high counts and vice versa. Also as is expected by intitution and observed from wordcloud the most frequent words are stop words.                                                                                                                                                                         Knowing that most of the web and smartphone users would regularly be using stop words it is believed that not removing stopwords here would help. One thing we need to look at is informal language of twitter which if not taken care may degrade quality of results. Also it is important to detect sentences in the dataset. Since final aim is to predict the correct word accoding to the sentence not according to context of document. Moreover, we are keeping each sentence in <START> <STOP> tags this is important as language works most of the words cannot start or sentences. For example a sentence {how are you} is represented as {<START> how are you <STOP>} in R qdap package allows us to detect sentences. We are hiding most of the code here so as to make things appreciable for a non scientis data manager however Rmd file is available at the following URL: <https://github.com/DivyanshBhatia/datasciencecoursera/milestone.Rmd>                                                                                                                               
+
+#### Bigram Details
+Blogs Frequent Bigrams
+```{r echo=FALSE}
+BlogsDTMbigram <- DocumentTermMatrix(VCorpus(VectorSource(sent_detect(paste(Corpus[[1]]$content,".")))),control=list(tokenize=BigramTokenizer))
+BlogsDTMbigramSF<- removeSparseTerms(BlogsDTMbigram,0.999)
+freq_bigram_blogs <- sort(colSums(as.matrix(BlogsDTMbigramSF)),decreasing=TRUE)
+head(BlogsDTMbigramSF,n=20)
+```
+
+News Frequent Bigrams
+```{r echo=FALSE}
+NewsDTMbigram <- DocumentTermMatrix(VCorpus(VectorSource(sent_detect(paste(Corpus[[2]]$content,".")))),control=list(tokenize=BigramTokenizer))
+NewsDTMbigramSF<- removeSparseTerms(NewsDTMbigram,0.999)
+freq_bigram_News <- sort(colSums(as.matrix(NewsDTMbigramSF)),decreasing=TRUE)
+head(freq_bigram_News,n=20)
+```
+
+Twitter Frequent Bigrams
+```{r echo=FALSE}
+TwitterDTMbigram <- DocumentTermMatrix(VCorpus(VectorSource(sent_detect(paste(Corpus[[3]]$content,".")))),control=list(tokenize=BigramTokenizer))
+TwitterDTMbigramSF<- removeSparseTerms(TwitterDTMbigram,0.999)
+freq_bigram_Twitter <- sort(colSums(as.matrix(TwitterDTMbigramSF)),decreasing=TRUE)
+head(freq_bigram_Twitter,n=20)
+```
+
+## 9. Predictive Method
+At current stage We observe each trigrams probability, bigrams probability, unigrams probability and try to apply                                                                                                                                                      Katz Back Off Model (Trigrams). To deal with unseen words we are working with Discounting method that is removing 0.5 from count of each available term pattern and as described in Katz Back Off Model (Trigrams) use these as a factor for unseen words.                                                                                                                                                                           
+                                                                                                                                                                                   Things in Action for next few weeks:
+                                                                                                                                                                                   1. Model improvement and Testing                                                                                                                                                                                 2. Comparison with existing models                                                                                                                                                                                  3. Improve Interfaces so that user enjoys typing                                                                                                                                                                             4. If and only if time permits and we are working in thick of things with previous three steps Trying to predict user is writing                                                                                                                                                                           for blogs, news, Twitter and generating suggestion specific to it.
+                                                                                                                                                                                   
+                                                                                                                                                                                   ### Thank You!!
+                                                                                                                                                                                   
+                                                                                                                                                                                   
